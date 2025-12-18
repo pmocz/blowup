@@ -45,7 +45,7 @@ def simulate_burgers_1d(u0, dx, dt, num_steps):
 # Example usage
 if __name__ == "__main__":
     # Initial condition: a sine wave
-    x = jnp.linspace(0, 2 * jnp.pi, 100)
+    x = jnp.linspace(0, 2 * jnp.pi, 400)
     u0 = jnp.sin(x)
 
     # Simulation parameters
@@ -60,5 +60,4 @@ if __name__ == "__main__":
     plt.plot(x, u_final)
     plt.xlabel("x")
     plt.ylabel("u")
-    plt.title("Final solution of 1D inviscid Burgers equation")
     plt.show()
