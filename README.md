@@ -8,6 +8,10 @@ Look for blow-up solutions to PDEs with differentiable JAX code. This is an alte
 
 ![Burgers 1D Solution](sol_burgers.png)
 
+## Boussinesq 2D
+
+![Boussinesq 2D Solution](sol_boussinesq.png)
+
 ## References
 
 * [Wang+ (2025). High precision PINNs in unbounded domains:
