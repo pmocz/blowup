@@ -54,7 +54,7 @@ def div(U1, U2, dy1, dy2):
     return dU1_dy1 + dU2_dy2
 
 
-def convert_to_reduced(U1, U2, Phi, Psi, dy1, dy2):
+def convert_to_reduced(U1, U2, Phi, Psi):
     """Convert full fields to reduced fields using symmetry."""
     # U1, Phi odd in y1
     # U2, Psi even in y1
@@ -63,15 +63,11 @@ def convert_to_reduced(U1, U2, Phi, Psi, dy1, dy2):
     U1_r = U1[U1.shape[0] // 2 + 1 :, :]
     Phi_r = Phi[Phi.shape[0] // 2 + 1 :, :]
     # evens:
-    U2_r = U2[U2.shape[0] // 2 :, 1:]  # remove y2=0 column
+    U2_r = U2[U2.shape[0] // 2 :, 1:]  # remove y2=0 axis since U2=0 there
     Psi_r = Psi[Psi.shape[0] // 2 :, :]
 
-    # d Omega(0,0) / d y1 = -1
-    # => d_xy U1 = 1
-    b = U1_r[0, 1]
-    c = U1_r[0, 2]
-    a = (4 * b - c - 2 * dy1 * dy2) / 3
-    U1_r = U1_r.at[0, 0].set(a)
+    # flatten U1_r, and drop the [0, 0] element since it's set by a constraint
+    U1_r = U1_r.flatten()[1:]
     return U1_r, U2_r, Phi_r, Psi_r
 
 
@@ -82,11 +78,14 @@ def convert_from_reduced(U1_r, U2_r, Phi_r, Psi_r, dy1, dy2):
     # U2(y1,0) = 0
 
     # d Omega(0,0) / d y1 = -1
-    # => d_xy U1 = 1
-    b = U1_r[0, 1]
-    c = U1_r[0, 2]
+    # => d_xy U1 (0,0) = 1
+    b = U1_r[0]
+    c = U1_r[1]
     a = (4 * b - c - 2 * dy1 * dy2) / 3
-    U1_r = U1_r.at[0, 0].set(a)
+
+    # add the [0,0] element back to U1_r and unflatten
+    U1_r = jnp.concatenate([jnp.array([a]), U1_r])
+    U1_r = U1_r.reshape((Phi_r.shape[0], Phi_r.shape[1]))
 
     # odds:
     U1_top = -jnp.flipud(U1_r)
@@ -94,7 +93,7 @@ def convert_from_reduced(U1_r, U2_r, Phi_r, Psi_r, dy1, dy2):
     Phi_top = -jnp.flipud(Phi_r)
     Phi = jnp.vstack([Phi_top, jnp.zeros((1, Phi_r.shape[1])), Phi_r])
     # evens:
-    U2_top = jnp.flipud(U2_r[1:, :])  # remove y2=0 row
+    U2_top = jnp.flipud(U2_r[1:, :])  # remove y1=0 axis
     U2 = jnp.vstack([U2_top, U2_r])
     U2 = jnp.hstack([jnp.zeros((U2.shape[0], 1)), U2])  # add zero row at y2=0 for U2
     Psi_top = jnp.flipud(Psi_r[1:, :])
@@ -160,9 +159,7 @@ def search(
     dy1 = Y1[1, 0] - Y1[0, 0]
     dy2 = Y2[0, 1] - Y2[0, 0]
 
-    U1_r, U2_r, Phi_r, Psi_r = convert_to_reduced(
-        U1_init, U2_init, Phi_init, Psi_init, dy1, dy2
-    )
+    U1_r, U2_r, Phi_r, Psi_r = convert_to_reduced(U1_init, U2_init, Phi_init, Psi_init)
     U = lambda_init, U1_r, U2_r, Phi_r, Psi_r
 
     optimizer = optax.adam(lr)
@@ -174,35 +171,22 @@ def search(
         U = optax.apply_updates(U, updates)
         print("Iteration:", i)
         print("  residual norm:", residual(U, Y1, Y2))
+        # live plot every 400 iters
+        if i % 400 == 0:
+            lambda_, U1_r, U2_r, Phi_r, Psi_r = U
+            U1, U2, Phi, Psi, Omega = convert_from_reduced(
+                U1_r, U2_r, Phi_r, Psi_r, dy1, dy2
+            )
+            plot_result(Y1, Y2, U1, U2, Omega, Phi, Psi)
+            plt.pause(0.1)
+            plt.close()
     lambda_, U1_r, U2_r, Phi_r, Psi_r = U
     U1, U2, Phi, Psi, Omega = convert_from_reduced(U1_r, U2_r, Phi_r, Psi_r, dy1, dy2)
     return lambda_, U1, U2, Omega, Phi, Psi
 
 
-def main():
-    """Search and plot results."""
-    # Grid
-    nhalf = 16  # XXX 200
-    y1lin = jnp.linspace(-20, 20, 2 * nhalf + 1)
-    y2lin = jnp.linspace(0, 20, nhalf + 1)
-    Y1, Y2 = jnp.meshgrid(y1lin, y2lin, indexing="ij")
-    # Initial guess
-    lambda_init = 1.917
-    U1_init = -jnp.sin(0.5 * jnp.pi / 20.0 * Y1) * 20
-    # Omega_init = -jnp.sin(1.5 * jnp.pi / 20.0 * Y1) * 0.6
-    Phi_init = -jnp.sin(1.5 * jnp.pi / 20.0 * Y1) * 0.6
-    U2_init = Y2
-    Psi_init = 0.5 * (1 - jnp.cos(2 * jnp.pi / 20.0 * Y1)) * 0.12
-
-    # Find self-similar solution
-    time_start = time.time()
-    lambda_, U1, U2, Omega, Phi, Psi = search(
-        Y1, Y2, lambda_init, U1_init, U2_init, Phi_init, Psi_init
-    )
-    print("Time elapsed:", time.time() - time_start)
-    print("Found lambda =", lambda_)
-
-    # Plot result
+def plot_result(Y1, Y2, U1, U2, Omega, Phi, Psi):
+    """Plot the solution fields."""
     fig, (ax1, ax2, ax3, ax4, ax5) = plt.subplots(
         1, 5, figsize=(12, 4), subplot_kw={"projection": "3d"}
     )
@@ -241,6 +225,33 @@ def main():
     ax5.set_xlim(-20, 20)
     ax5.set_ylim(0, 20)
     ax5.set_title("Psi")
+
+
+def main():
+    """Search and plot results."""
+    # Grid
+    nhalf = 20  # XXX 200
+    y1lin = jnp.linspace(-20, 20, 2 * nhalf + 1)
+    y2lin = jnp.linspace(0, 20, nhalf + 1)
+    Y1, Y2 = jnp.meshgrid(y1lin, y2lin, indexing="ij")
+    # Initial guess
+    lambda_init = 1.917
+    U1_init = -jnp.sin(0.5 * jnp.pi / 20.0 * Y1) * 20
+    # Omega_init = -jnp.sin(1.5 * jnp.pi / 20.0 * Y1) * 0.6
+    Phi_init = -jnp.sin(1.5 * jnp.pi / 20.0 * Y1) * 0.6
+    U2_init = Y2
+    Psi_init = 0.5 * (1 - jnp.cos(2 * jnp.pi / 20.0 * Y1)) * 0.12
+
+    # Find self-similar solution
+    time_start = time.time()
+    lambda_, U1, U2, Omega, Phi, Psi = search(
+        Y1, Y2, lambda_init, U1_init, U2_init, Phi_init, Psi_init
+    )
+    print("Time elapsed:", time.time() - time_start)
+    print("Found lambda =", lambda_)
+
+    # Plot result
+    plot_result(Y1, Y2, U1, U2, Omega, Phi, Psi)
 
     plt.savefig("sol_boussinesq.png", dpi=150)
     plt.show()
