@@ -6,9 +6,13 @@ Look for blow-up solutions to PDEs with differentiable JAX code. This is an alte
 
 ## Burgers 1D
 
+[`python search_burgers.py`](https://github.com/pmocz/blowup/blob/main/search_burgers.py)
+
 ![Burgers 1D Solution](sol_burgers.png)
 
 ## Boussinesq 2D
+
+[`python search_boussinesq.py`](https://github.com/pmocz/blowup/blob/main/search_boussinesq.py)
 
 ![Boussinesq 2D Solution](sol_boussinesq.png)
 
