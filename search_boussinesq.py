@@ -17,6 +17,8 @@ halfplane: (y1,y2) in [-20,20] x [0, 20]
 
 U2(y1,0) = 0
 d Omega(0,0) / d y1 = -1
+
+TODO: XXX NOT YET WORKING!
 """
 
 
@@ -52,7 +54,7 @@ def div(U1, U2, dy1, dy2):
     return dU1_dy1 + dU2_dy2
 
 
-def convert_to_reduced(U1, U2, Phi, Psi):
+def convert_to_reduced(U1, U2, Phi, Psi, dy1, dy2):
     """Convert full fields to reduced fields using symmetry."""
     # U1, Phi odd in y1
     # U2, Psi even in y1
@@ -63,6 +65,13 @@ def convert_to_reduced(U1, U2, Phi, Psi):
     # evens:
     U2_r = U2[U2.shape[0] // 2 :, 1:]  # remove y2=0 column
     Psi_r = Psi[Psi.shape[0] // 2 :, :]
+
+    # d Omega(0,0) / d y1 = -1
+    # => d_xy U1 = 1
+    b = U1_r[0, 1]
+    c = U1_r[0, 2]
+    a = (4 * b - c - 2 * dy1 * dy2) / 3
+    U1_r = U1_r.at[0, 0].set(a)
     return U1_r, U2_r, Phi_r, Psi_r
 
 
@@ -96,6 +105,7 @@ def convert_from_reduced(U1_r, U2_r, Phi_r, Psi_r, dy1, dy2):
     return U1, U2, Phi, Psi, Omega
 
 
+@jax.jit
 def residual(U, Y1, Y2):
     """Compute the residual of the discretized PDE."""
     lambda_, U1_r, U2_r, Phi_r, Psi_r = U
@@ -122,12 +132,14 @@ def residual(U, Y1, Y2):
     eqn2 = (2 + dy1_U1) * Phi + fac1 * dy1_Phi + fac2 * dy2_Phi + dy1_U2 * Psi
     eqn3 = (2 + dy2_U2) * Psi + fac1 * dy1_Psi + fac2 * dy2_Psi + dy2_U1 * Phi
     eqn4 = div(U1, U2, dy1, dy2)
+    eqn5 = dy1_Psi - dy2_Phi
 
     error_norm = (
         jnp.linalg.norm(eqn1)
         + jnp.linalg.norm(eqn2)
         + jnp.linalg.norm(eqn3)
         + jnp.linalg.norm(eqn4)
+        + jnp.linalg.norm(eqn5)
     )
     return error_norm
 
@@ -140,14 +152,17 @@ def search(
     U2_init,
     Phi_init,
     Psi_init,
-    num_iters=400,  # XXX 1000,
-    lr=0.01,  # XXX0.001,
+    num_iters=10000,  # XXX 1000,
+    lr=0.001,
 ):
     """Find the self-similar solution U(y) using Adam optimizer."""
 
-    U1_r, U2_r, Phi_r, Psi_r = convert_to_reduced(U1_init, U2_init, Phi_init, Psi_init)
     dy1 = Y1[1, 0] - Y1[0, 0]
     dy2 = Y2[0, 1] - Y2[0, 0]
+
+    U1_r, U2_r, Phi_r, Psi_r = convert_to_reduced(
+        U1_init, U2_init, Phi_init, Psi_init, dy1, dy2
+    )
     U = lambda_init, U1_r, U2_r, Phi_r, Psi_r
 
     optimizer = optax.adam(lr)
@@ -167,7 +182,7 @@ def search(
 def main():
     """Search and plot results."""
     # Grid
-    nhalf = 40  # XXX 200
+    nhalf = 16  # XXX 200
     y1lin = jnp.linspace(-20, 20, 2 * nhalf + 1)
     y2lin = jnp.linspace(0, 20, nhalf + 1)
     Y1, Y2 = jnp.meshgrid(y1lin, y2lin, indexing="ij")
